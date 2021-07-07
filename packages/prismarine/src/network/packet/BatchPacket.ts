@@ -3,12 +3,15 @@ import DataPacket from './DataPacket';
 import Server from '../../Server';
 import Zlib from 'zlib';
 
+/**
+ * @internal
+ */
 export default class BatchPacket extends DataPacket {
     public static NetID = 0xfe;
 
     private payload = Buffer.alloc(0);
     // Bigger compression level leads to more CPU usage and less network, and vice versa
-    private readonly compressionLevel: number = Server.instance.getConfig().getPacketCompressionLevel();
+    private readonly compressionLevel: number = Server?.instance?.getConfig().getPacketCompressionLevel() ?? 7;
 
     public decodeHeader(): void {
         const pid = this.readByte();

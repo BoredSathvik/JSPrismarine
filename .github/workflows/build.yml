@@ -5,56 +5,30 @@ on:
             - master
 
 jobs:
-    prismarine-x64-linux:
+    artifacts:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
             - uses: actions/setup-node@v2
               with:
                   node-version: 14
-            - run: lerna bootstrap
+            - run: npm install -g npm@latest
+            - run: npm install -g lerna
+            - run: lerna bootstrap --concurrency=1
             - run: npm install
-            - run: npm run build
+            - run: npm run build:source
             - run: npm prune --production
-            - run: npm install -g github:kkoomen/pkg
+            - run: npm install -g pkg
             - run: npm run package
             - uses: actions/upload-artifact@v2
               with:
                   name: prismarine-x64-linux
-                  path: builds/prismarine-linux
-
-    prismarine-x64-macos:
-        runs-on: macos-latest
-        steps:
-            - uses: actions/checkout@v2
-            - uses: actions/setup-node@v2
-              with:
-                  node-version: 14
-            - run: lerna bootstrap
-            - run: npm install
-            - run: npm run build
-            - run: npm prune --production
-            - run: npm install -g github:kkoomen/pkg
-            - run: npm run package
+                  path: builds/monorepo-linux
             - uses: actions/upload-artifact@v2
               with:
                   name: prismarine-x64-macos
-                  path: builds/prismarine-macos
-
-    prismarine-x64-win32:
-        runs-on: windows-latest
-        steps:
-            - uses: actions/checkout@v2
-            - uses: actions/setup-node@v2
-              with:
-                  node-version: 14
-            - run: lerna bootstrap
-            - run: npm install
-            - run: npm run build
-            - run: npm prune --production
-            - run: npm install -g github:kkoomen/pkg
-            - run: npm run package
+                  path: builds/monorepo-macos
             - uses: actions/upload-artifact@v2
               with:
                   name: prismarine-x64-win32
-                  path: builds/prismarine-win.exe
+                  path: builds/monorepo-win.exe

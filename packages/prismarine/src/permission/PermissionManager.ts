@@ -1,4 +1,3 @@
-import CommandExecuter from '../command/CommandExecuter';
 import Player from '../player/Player';
 import type Server from '../Server';
 import cwd from '../utils/cwd';
@@ -12,6 +11,11 @@ interface OpType {
     name: string;
 }
 
+/**
+ * Permission manager.
+ *
+ * @public
+ */
 export default class PermissionManager {
     private readonly server: Server;
     private readonly ops: Set<string> = new Set();
@@ -34,6 +38,10 @@ export default class PermissionManager {
         this.defaultPermissions = [];
     }
 
+    public getDefaultPermissions(): string[] {
+        return this.defaultPermissions;
+    }
+
     public async getPermissions(player: Player): Promise<string[]> {
         return [
             ...this.defaultPermissions,
@@ -43,10 +51,10 @@ export default class PermissionManager {
     }
 
     /**
-     * Set player permissions.
+     * Set a player's permissions.
      *
-     * NOTE: This will not be saved to the permissions.json
-     * file as that is to be handled by the plugin author in a plugin-specific file.
+     * @remarks
+     * This will not be saved to the permissions.json file.
      */
     public setPermissions(player: Player, permissions: string[]) {
         this.permissions.set(player.getName(), permissions ?? []);
@@ -55,7 +63,7 @@ export default class PermissionManager {
     private async parsePermissions(): Promise<void> {
         try {
             if (!fs.existsSync(path.join(cwd(), '/permissions.json'))) {
-                this.server.getLogger().warn(`Failed to load permissions list!`, 'PermissionManager/parsePermissions');
+                this.server.getLogger()?.warn(`Failed to load permissions list!`, 'PermissionManager/parsePermissions');
                 fs.writeFileSync(
                     path.join(cwd(), '/permissions.json'),
                     JSON.stringify(
@@ -98,7 +106,7 @@ export default class PermissionManager {
                 this.permissions.set(player.name, player.permissions.length <= 0 ? [] : player.permissions)
             );
         } catch (error) {
-            this.server.getLogger().error(error, 'PermissionManager/parsePermissions');
+            this.server.getLogger()?.error(error, 'PermissionManager/parsePermissions');
             throw new Error(`Invalid permissions.json file.`);
         }
     }
@@ -106,7 +114,7 @@ export default class PermissionManager {
     private async parseOps(): Promise<void> {
         try {
             if (!fs.existsSync(path.join(cwd(), '/ops.json'))) {
-                this.server.getLogger().warn(`Failed to load operators list!`, 'PermissionManager/parseOps');
+                this.server.getLogger()?.warn(`Failed to load operators list!`, 'PermissionManager/parseOps');
                 fs.writeFileSync(path.join(cwd(), '/ops.json'), '[]');
             }
 
@@ -115,7 +123,7 @@ export default class PermissionManager {
 
             ops.map((op) => this.ops.add(op.name));
         } catch (error) {
-            this.server.getLogger().error(error, 'PermissionManager/parseOps');
+            this.server.getLogger()?.error(error, 'PermissionManager/parseOps');
             throw new Error(`Invalid ops.json file.`);
         }
     }
@@ -158,14 +166,16 @@ export default class PermissionManager {
         return this.ops.has(username);
     }
 
-    public can(executer: CommandExecuter) {
+    public can(executer: Player) {
         return {
             execute: (permission?: string) => {
+                if (!executer) throw new Error(`Executer can't be undefined or null`);
+
                 if (!permission) return true;
-                if (!executer.isPlayer()) return true;
-                if (executer.isOp()) return true;
-                if ((executer as Player).getPermissions().includes(permission)) return true;
-                if ((executer as Player).getPermissions().includes('*')) return true;
+                if (executer.isConsole()) return true;
+                if (executer.isOp?.()) return true;
+                if (executer.getPermissions().includes(permission)) return true;
+                if (executer.getPermissions().includes('*')) return true;
 
                 const split = permission.split('.');
                 let scope = '';
@@ -173,8 +183,8 @@ export default class PermissionManager {
                     if (scope) scope = `${scope}.${action}`;
                     else scope = action;
 
-                    if ((executer as Player).getPermissions().includes(scope)) return true;
-                    if ((executer as Player).getPermissions().includes(`${scope}.*`)) return true;
+                    if (executer.getPermissions().includes(scope)) return true;
+                    if (executer.getPermissions().includes(`${scope}.*`)) return true;
                 }
 
                 return false;

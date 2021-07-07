@@ -1,9 +1,9 @@
-import PluginApiVersion from './api/PluginApiVersion';
+import PluginApi from './api/PluginApi';
 import Server from '../Server';
 import path from 'path';
 
 export class Plugin {
-    public constructor(api: PluginApiVersion) {}
+    public constructor(api: PluginApi) {}
     public async onEnable() {}
     public async onDisable() {}
 }
@@ -18,7 +18,7 @@ export default class PluginFile {
     private readonly displayName: string;
     private readonly version: string;
 
-    public constructor(server: Server, dir: string, pluginApiVersion: PluginApiVersion) {
+    public constructor(server: Server, dir: string, pluginApiVersion: PluginApi) {
         this.server = server;
         this.path = dir;
         this.package = require(path.join(this.path, 'package.json'));
@@ -29,7 +29,7 @@ export default class PluginFile {
         else if (!this.package.prismarine.displayName)
             this.server
                 .getLogger()
-                .debug(`Plugin with id ${this.package.name}@${this.package.version} is missing displayName!`);
+                ?.debug(`Plugin with id ${this.package.name}@${this.package.version} is missing displayName!`);
 
         this.name = this.package.name;
         this.displayName = this.package.prismarine.name ?? this.name;

@@ -1,17 +1,30 @@
 import Air from '../block/blocks/Air';
 import ContainerEntry from './ContainerEntry';
 
-// TODO: viewer logic
+/**
+ * Inventory.
+ *
+ * @public
+ */
 export default class Inventory {
     private readonly slots: number;
     /**
      * (Slot number - Item in the slot)
      */
-    private readonly content: Map<number, ContainerEntry> = new Map();
+    private readonly content: Map<number, ContainerEntry> = new Map() as Map<number, ContainerEntry>;
 
     public constructor(slots = 0, items: ContainerEntry[] = []) {
         this.slots = slots;
         this.setItems(items);
+    }
+
+    /**
+     * Get window id.
+     *
+     * TODO: implement this
+     */
+    public getId(): number {
+        return 0;
     }
 
     /**
@@ -50,6 +63,17 @@ export default class Inventory {
 
         this.content.set(slot, item);
         return true;
+    }
+
+    /**
+     * Add an item to the first available slot
+     */
+    public addItem(item: ContainerEntry) {
+        for (let i = 0; i < this.slots; i++)
+            if (!this.content.has(i)) {
+                this.setItem(i, item);
+                return;
+            }
     }
 
     /**

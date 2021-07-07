@@ -1,5 +1,6 @@
 import * as d3 from 'd3-interpolate';
 
+import Identifiers from '../Identifiers';
 import type MovePlayerPacket from '../packet/MovePlayerPacket';
 import MovementType from '../type/MovementType';
 import PacketHandler from './PacketHandler';
@@ -9,6 +10,8 @@ import type Server from '../../Server';
 import Vector3 from '../../math/Vector3';
 
 export default class MovePlayerHandler implements PacketHandler<MovePlayerPacket> {
+    public static NetID = Identifiers.MovePlayerPacket;
+
     public async handle(packet: MovePlayerPacket, server: Server, player: Player): Promise<void> {
         // Update movement for every player & interpolate position to smooth it
         const interpolatedVector = d3.interpolateObject(
@@ -33,10 +36,17 @@ export default class MovePlayerHandler implements PacketHandler<MovePlayerPacket
             await player.getConnection().broadcastMove(player, MovementType.Reset);
         }
 
+        // Make sure we actually change X or Z coordinates before
+        // we try to update the current chunking. This prevents
+        // and expensive call to *getWorld().getChunkAt*.
+        let updateChunk = false;
+        if (Math.trunc(player.getX()) !== Math.trunc(resultantVector.getX())) updateChunk = true;
+        if (Math.trunc(player.getZ()) !== Math.trunc(resultantVector.getZ())) updateChunk = true;
+
         // Position
-        player.setX(resultantVector.getX());
-        player.setY(resultantVector.getY());
-        player.setZ(resultantVector.getZ());
+        await player.setX(resultantVector.getX());
+        await player.setY(resultantVector.getY());
+        await player.setZ(resultantVector.getZ());
 
         // Rotation
         player.pitch = packet.pitch;
@@ -53,10 +63,10 @@ export default class MovePlayerHandler implements PacketHandler<MovePlayerPacket
             await onlinePlayer.getConnection().broadcastMove(player, MovementType.Normal);
         }
 
-        // TODO: hash
-        (async () => {
+        // TODO: this seems awfully wasteful?
+        if (updateChunk) {
             const chunk = await player.getWorld().getChunkAt(player.getX(), player.getZ());
-            if (player.currentChunk !== chunk) player.currentChunk = chunk;
-        })();
+            player.setCurrentChunk(chunk);
+        }
     }
 }

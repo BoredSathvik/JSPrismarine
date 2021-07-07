@@ -3,9 +3,10 @@ import { ArgumentCommandNode, CommandDispatcher } from '@jsprismarine/brigadier'
 import Chat from '../chat/Chat';
 import Command from './Command';
 import { CommandArgument } from './CommandArguments';
-import CommandExecuter from './CommandExecuter';
 import CommandNode from '@jsprismarine/brigadier/dist/lib/tree/CommandNode';
 import CommandRegisterEvent from '../events/command/CommandRegisterEvents';
+import Entity from '../entity/Entity';
+import { Player } from '../Prismarine';
 import Server from '../Server';
 import Timer from '../utils/Timer';
 import fs from 'fs';
@@ -14,7 +15,7 @@ import path from 'path';
 export default class CommandManager {
     private readonly commands: Map<string, Command> = new Map();
     private readonly server: Server;
-    private dispatcher!: CommandDispatcher<CommandExecuter>;
+    private dispatcher!: CommandDispatcher<Player>;
 
     public constructor(server: Server) {
         this.server = server;
@@ -22,7 +23,7 @@ export default class CommandManager {
     }
 
     /**
-     * OnEnable hook
+     * OnEnable hook.
      */
     public async onEnable() {
         const timer = new Timer();
@@ -49,22 +50,22 @@ export default class CommandManager {
                 try {
                     await this.registerClassCommand(command);
                 } catch (err) {
-                    this.server.getLogger().warn(`Failed to register command ${command.id}: ${err}`);
-                    this.server.getLogger().silly(err.stack);
+                    this.server.getLogger()?.warn(`Failed to register command ${command.id}: ${err}`);
+                    this.server.getLogger()?.debug(err.stack);
                 }
             })
         );
 
         this.server
             .getLogger()
-            .debug(
+            ?.verbose(
                 `Registered §b${this.commands.size}§r commands(s) (took ${timer.stop()} ms)!`,
                 'CommandManager/onEnable'
             );
     }
 
     /**
-     * OnDisable hook
+     * OnDisable hook.
      */
     public async onDisable() {
         this.commands.clear();
@@ -80,7 +81,7 @@ export default class CommandManager {
         if (!command?.register)
             this.server
                 .getLogger()
-                .warn(
+                ?.warn(
                     `Command is missing "register" member. This is unsupported!`,
                     'CommandManager/registerClassCommand'
                 );
@@ -97,22 +98,24 @@ export default class CommandManager {
 
         this.server
             .getLogger()
-            .silly(`Command with id §b${command.id}§r registered`, 'CommandManager/registerClassCommand');
+            ?.debug(`Command with id §b${command.id}§r registered`, 'CommandManager/registerClassCommand');
     }
 
     /**
-     * Get all enabled commands
+     * Get all enabled commands.
      */
     public getCommands(): Map<string, Command> {
         return this.commands;
     }
 
     /**
-     * Get a list of all command variants
-     * EXCLUDING legacy commands
+     * Get a list of all command variants.
+     *
+     * @remarks
+     * This is EXCLUDING legacy commands.
      */
-    public getCommandsList(): Array<[string, CommandNode<CommandExecuter>, CommandArgument[][]]> {
-        const parseNode = (node: CommandNode<CommandExecuter>): any[] => {
+    public getCommandsList(): Array<[string, CommandNode<Player>, CommandArgument[][]]> {
+        const parseNode = (node: CommandNode<Player>): any[] => {
             if (node.getChildrenCount() <= 0) {
                 return [
                     {
@@ -186,16 +189,20 @@ export default class CommandManager {
     /**
      * Get dispatcher
      */
-    public getDispatcher(): CommandDispatcher<CommandExecuter> {
+    public getDispatcher(): CommandDispatcher<Player> {
         return this.dispatcher;
     }
 
     /**
      * Dispatches a command and executes them.
+     *
+     * @param sender the player/console who executed the command
+     * @param target the Player/entity/console who should execute the command
+     * @param input the command input including arguments
      */
-    public async dispatchCommand(sender: CommandExecuter, input = '') {
+    public async dispatchCommand(sender: Player, target: Entity | Player, input = '') {
         try {
-            const parsed = this.dispatcher.parse(input.trim(), sender);
+            const parsed = this.dispatcher.parse(input.trim(), target as Player);
             const id = parsed.getReader().getString().split(' ')[0];
 
             // Get command from parsed string
@@ -216,7 +223,7 @@ export default class CommandManager {
                 // Legacy commands
                 this.server
                     .getLogger()
-                    .warn(`${id} is using the legacy command format`, 'CommandManager/dispatchCommand');
+                    ?.warn(`${id} is using the legacy command format`, 'CommandManager/dispatchCommand');
                 res.push(
                     await command.execute(
                         sender as any,
@@ -226,22 +233,38 @@ export default class CommandManager {
             } else {
                 // Handle aliases
                 if (command?.aliases?.includes(id)) {
-                    await this.dispatchCommand(sender, input.replace(id, command.id.split(':')[1]));
+                    await this.dispatchCommand(sender, target, input.replace(id, command.id.split(':')[1]));
                     return;
                 }
                 res = await Promise.all(this.dispatcher.execute(parsed));
             }
 
-            res.forEach(async (res: any) => {
+            const feedback = ((sender as any) as Entity)
+                .getWorld()
+                .getGameruleManager()
+                .getGamerule('sendCommandFeedback');
+
+            // Make sure we don't send feedback if sendCommandFeedback is set to false
+            if (feedback)
+                res.forEach(async (res: any) => {
+                    const chat = new Chat(
+                        this.server.getConsole(),
+                        `§o§7[${target.getName()}: ${res ?? `issued server command: /${input}`}]§r`,
+                        '*.ops'
+                    );
+
+                    // TODO: should this be broadcasted to the executer?
+                    await this.server.getChatManager().send(chat);
+                });
+            else {
                 const chat = new Chat(
                     this.server.getConsole(),
                     `§o§7[${sender.getName()}: ${res ?? `issued server command: /${input}`}]§r`,
-                    '*.ops'
+                    '*.console'
                 );
 
-                // TODO: should this be broadcasted to the executer?
                 await this.server.getChatManager().send(chat);
-            });
+            }
         } catch (error) {
             if (error?.type?.message?.toString?.() === 'Unknown command') {
                 await sender.sendMessage(`§cUnknown command. Type "/help" for help.`);
@@ -251,11 +274,11 @@ export default class CommandManager {
             await sender.sendMessage(`§c${error}`);
             this.server
                 .getLogger()
-                .debug(
-                    `Player ${sender.getFormattedUsername()} tried to execute ${input}, but it failed with the error: ${error}`,
+                ?.debug(
+                    `Player ${target.getFormattedUsername()} tried to execute ${input}, but it failed with the error: ${error}`,
                     'CommandManager/dispatchCommand'
                 );
-            this.server.getLogger().silly(`${error.stack}`, 'CommandManager/dispatchCommand');
+            this.server.getLogger()?.debug(`${error.stack}`, 'CommandManager/dispatchCommand');
         }
     }
 }

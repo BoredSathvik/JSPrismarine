@@ -14,7 +14,7 @@ import InetAddress from './utils/InetAddress';
 import NACK from './protocol/NACK';
 import NewIncomingConnection from './protocol/NewIncomingConnection';
 import Packet from './protocol/Packet';
-import RakNetListener from './RakNetListener';
+import type RakNetListener from './RakNetListener';
 
 export enum Priority {
     NORMAL,
@@ -148,8 +148,12 @@ export default class Connection {
         await this.sendPacketQueue();
     }
 
-    public disconnect(reason = 'unknown'): void {
-        this.listener.removeConnection(this, reason);
+    /**
+     * Kick a client
+     * @param reason the reason message, optional
+     */
+    public disconnect(reason?: string): void {
+        void this.listener.removeConnection(this, reason ?? '');
     }
 
     /**

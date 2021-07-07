@@ -7,6 +7,8 @@ import ResourcePacksInfoPacket from '../packet/ResourcePacksInfoPacket';
 import type Server from '../../Server';
 
 export default class LoginHandler implements PacketHandler<LoginPacket> {
+    public static NetID = Identifiers.LoginPacket;
+
     public async handle(packet: LoginPacket, server: Server, player: Player): Promise<void> {
         // TODO: Check if player count >= max players
 
@@ -21,6 +23,7 @@ export default class LoginHandler implements PacketHandler<LoginPacket> {
             return;
         }
 
+        // Kick the player if their username is invalid
         if (!packet.displayName) {
             await player.kick('Invalid username!');
             return;

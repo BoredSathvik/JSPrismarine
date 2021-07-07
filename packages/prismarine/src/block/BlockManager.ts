@@ -1,45 +1,47 @@
+import * as Blocks from './Blocks';
+
 import Block from './Block';
 import { BlockIdsType } from './BlockIdsType';
 import BlockRegisterEvent from '../events/block/BlockRegisterEvent';
 import Server from '../Server';
 import Timer from '../utils/Timer';
-import fs from 'fs';
-import path from 'path';
 
 export default class BlockManager {
     private readonly server: Server;
     private readonly blocks = new Map();
+    private readonly javaBlocks = new Map();
 
     public constructor(server: Server) {
         this.server = server;
     }
 
     /**
-     * OnEnable hook
+     * OnEnable hook.
      */
     public async onEnable() {
         await this.importBlocks();
     }
 
     /**
-     * OnDisable hook
+     * OnDisable hook.
      */
     public async onDisable() {
         this.blocks.clear();
     }
 
     /**
-     * Get block by namespaced  id
+     * Get block by namespaced ID.
      */
     public getBlock(name: string): Block {
-        if (!this.blocks.has(name)) {
+        if (!this.blocks.has(name) && !this.javaBlocks.has(name)) {
             throw new Error(`invalid block with id ${name}`);
         }
-        return this.blocks.get(name)!;
+
+        return this.blocks.get(name)! || this.javaBlocks.get(name)!;
     }
 
     /**
-     * Get block by numeric id
+     * Get block by numeric ID.
      */
     public getBlockById(id: number): Block {
         if (!BlockIdsType[id]) {
@@ -50,7 +52,7 @@ export default class BlockManager {
     }
 
     /**
-     * Get block by numeric id and damage value
+     * Get block by numeric id and meta value.
      */
     public getBlockByIdAndMeta(id: number, meta: number): Block {
         const block = this.getBlocks().find((a) => a.id === id && a.meta === meta);
@@ -60,16 +62,20 @@ export default class BlockManager {
     }
 
     /**
-     * Get all blocks
+     * Get all blocks.
+     *
+     * @returns all registered blocks.
      */
     public getBlocks(): Block[] {
         return Array.from(this.blocks.values());
     }
 
     /**
-     * Registers block from block class
+     * Register a block.
+     *
+     * @param block The block
      */
-    public async registerClassBlock(block: Block) {
+    public async registerBlock(block: Block) {
         try {
             this.blocks.get(block.name);
             this.getBlockByIdAndMeta(block.getId(), block.getMeta());
@@ -83,42 +89,25 @@ export default class BlockManager {
         await this.server.getEventManager().emit('blockRegister', event);
         if (event.cancelled) return;
 
-        this.server.getLogger().silly(`Block with id §b${block.name}§r registered`, 'BlockManager/registerClassBlock');
+        this.server.getLogger()?.debug(`Block with id §b${block.name}§r registered`, 'BlockManager/registerClassBlock');
         this.blocks.set(block.name, block);
+        this.javaBlocks.set(block.javaName, block);
     }
 
     /**
-     * Loops through ./src/block/blocks and register them
+     * Register blocks exported by './Blocks'
      */
     private async importBlocks() {
-        try {
-            const timer = new Timer();
-            const blocks = fs.readdirSync(path.join(__dirname, 'blocks'));
-            await Promise.all(
-                blocks.map(async (id: string) => {
-                    if (id.includes('.test.') || id.includes('.d.ts') || id.includes('.map')) {
-                        return; // Exclude test files
-                    }
+        const timer = new Timer();
 
-                    const block = require(`./blocks/${id}`).default;
-                    try {
-                        await this.registerClassBlock(new block());
-                    } catch (error) {
-                        this.server
-                            .getLogger()
-                            .error(`${id} failed to register: ${error}`, 'BlockManager/importBlocks');
-                        this.server.getLogger().silly(error.stack, 'BlockManager/importBlocks');
-                    }
-                })
+        // Dynamically register blocks
+        await Promise.all(Object.entries(Blocks).map(async ([, block]) => this.registerBlock(new block())));
+
+        this.server
+            .getLogger()
+            ?.verbose(
+                `Registered §b${this.blocks.size}§r block(s) (took ${timer.stop()} ms)!`,
+                'BlockManager/importBlocks'
             );
-            this.server
-                .getLogger()
-                .debug(
-                    `Registered §b${this.blocks.size}§r block(s) (took ${timer.stop()} ms)!`,
-                    'BlockManager/importBlocks'
-                );
-        } catch (error) {
-            this.server.getLogger().error(`Failed to register blocks: ${error}`, 'BlockManager/importBlocks');
-        }
     }
 }

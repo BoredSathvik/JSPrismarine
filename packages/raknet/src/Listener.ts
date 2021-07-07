@@ -58,7 +58,9 @@ export default class Listener extends EventEmitter implements RakNetListener {
             try {
                 await this.sendBuffer(await this.handleUnconnected(buffer, rinfo), rinfo.address, rinfo.port);
             } catch (error: any) {
-                this.server.getLogger().silly(`Failed to handle an offline packet: ${error}`, 'raknet/Listener/listen');
+                this.server
+                    .getLogger()
+                    ?.debug(`Failed to handle an offline packet: ${error}`, 'raknet/Listener/listen');
             }
         });
 
@@ -205,7 +207,7 @@ export default class Listener extends EventEmitter implements RakNetListener {
     /**
      * Remove a connection from all connections.
      */
-    public async removeConnection(connection: Connection, reason: string): Promise<void> {
+    public async removeConnection(connection: Connection, reason?: string): Promise<void> {
         const inetAddr = connection.getAddress();
         const token = `${inetAddr.getAddress()}:${inetAddr.getPort()}`;
         if (this.connections.has(token)) {

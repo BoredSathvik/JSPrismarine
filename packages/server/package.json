@@ -1,0 +1,32 @@
+{
+    "name": "@jsprismarine/server",
+    "version": "0.1.0-rc.49",
+    "description": "Minecraft: Bedrock Edition RakNet client",
+    "main": "./dist/Server.js",
+    "types": "./dist/Server.d.ts",
+    "funding": "https://github.com/sponsors/JSPrismarine",
+    "scripts": {
+        "build": "tsc --build src",
+        "start": "cross-env NODE_ENV=production node ./dist/Server.js --unhandled-rejections=strict",
+        "start:dev": "cross-env NODE_ENV=development JSP_DIR=jsp node ./dist/Server.js"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/JSPrismarine/JSPrismarine.git"
+    },
+    "keywords": [
+        "nodejs",
+        "raknet"
+    ],
+    "author": "JSPrismarine",
+    "license": "MIT",
+    "homepage": "https://github.com/JSPrismarine/JSPrismarine/tree/master/packages/client",
+    "devDependencies": {
+        "typescript": "4.2.4"
+    },
+    "dependencies": {
+        "@jsprismarine/prismarine": "^0.1.0-rc.49",
+        "@jsprismarine/raknet": "^0.1.0-rc.49",
+        "@jsprismarine/updater": "^0.1.0-rc.49"
+    }
+}

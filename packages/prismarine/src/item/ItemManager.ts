@@ -1,10 +1,11 @@
+import * as Items from './Items';
+
 import Item from './Item';
 import ItemRegisterEvent from '../events/items/ItemRegisterEvent';
 import Server from '../Server';
 import Timer from '../utils/Timer';
-import fs from 'fs';
-import path from 'path';
 
+// TODO: Don't dynamically import, do it like ./network/Protocol etc
 export default class ItemManager {
     private readonly server: Server;
     private readonly items = new Map();
@@ -14,21 +15,21 @@ export default class ItemManager {
     }
 
     /**
-     * OnEnable hook
+     * OnEnable hook.
      */
     public async onEnable() {
         await this.importItems();
     }
 
     /**
-     * OnDisable hook
+     * OnDisable hook.
      */
     public async onDisable() {
         this.items.clear();
     }
 
     public getItem(name: string): Item {
-        return this.items.get(name);
+        return this.items.get(name) as Item;
     }
 
     /**
@@ -38,48 +39,45 @@ export default class ItemManager {
         return this.getItems().find((a) => a.getId() === id) ?? null;
     }
 
+    /**
+     * Get all items.
+     *
+     * @returns all registered items.
+     */
     public getItems(): Item[] {
-        return Array.from(this.items.values());
+        return Array.from(this.items.values()) as Item[];
     }
 
-    public registerClassItem = async (item: Item) => {
+    /**
+     * Register an item.
+     *
+     * @param item The item to be registered
+     */
+    public registerItem = async (item: Item) => {
         const event = new ItemRegisterEvent(item);
         await this.server.getEventManager().emit('itemRegister', event);
         if (event.cancelled) return;
 
-        this.server.getLogger().silly(`Item with id §b${item.getName()}§r registered`, 'ItemManager/registerClassItem');
+        this.server
+            .getLogger()
+            ?.debug(`Item with id §b${item.getName()}§r registered`, 'ItemManager/registerClassItem');
         this.items.set(item.getName(), item);
     };
 
     /**
-     * Loops through ./src/item/items and register them
+     * Register items exported by './Items'.
      */
     private async importItems() {
-        try {
-            const timer = new Timer();
+        const timer = new Timer();
 
-            const items = fs.readdirSync(path.join(__dirname, 'items'));
-            await Promise.all(
-                items.map(async (id: string) => {
-                    if (id.includes('.test.') || id.includes('.d.ts') || id.includes('.map')) return; // Exclude test files
+        // Dynamically register blocks
+        await Promise.all(Object.entries(Items).map(async ([, item]) => this.registerItem(new item())));
 
-                    const item = require(`./items/${id}`).default;
-                    try {
-                        await this.registerClassItem(new item());
-                    } catch (error) {
-                        this.server.getLogger().error(`${id} failed to register: ${error}`, 'ItemManager/importItems');
-                        this.server.getLogger().silly(error.stack, 'ItemManager/importItems');
-                    }
-                })
+        this.server
+            .getLogger()
+            ?.verbose(
+                `Registered §b${this.items.size}§r item(s) (took ${timer.stop()} ms)!`,
+                'ItemManager/importItems'
             );
-            this.server
-                .getLogger()
-                .debug(
-                    `Registered §b${this.items.size}§r item(s) (took ${timer.stop()} ms)!`,
-                    'ItemManager/importItems'
-                );
-        } catch (error) {
-            this.server.getLogger().error(`Failed to register items: ${error}`, 'ItemManager/importItems');
-        }
     }
 }

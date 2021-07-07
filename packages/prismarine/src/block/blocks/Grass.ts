@@ -8,13 +8,14 @@ export default class Grass extends Solid {
     public constructor() {
         super({
             name: 'minecraft:grass',
+            javaName: 'minecraft:grass_block',
             id: BlockIdsType.Grass,
             hardness: 0.6
         });
     }
 
     public getToolType() {
-        return BlockToolType.Shovel;
+        return [BlockToolType.None, BlockToolType.Shovel];
     }
 
     public getDropsForCompatibleTool(item: Item, server: Server) {

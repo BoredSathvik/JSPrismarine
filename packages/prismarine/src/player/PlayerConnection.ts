@@ -6,12 +6,14 @@ import PlayerListPacket, { PlayerListAction, PlayerListEntry } from '../network/
 
 import AddPlayerPacket from '../network/packet/AddPlayerPacket';
 import Air from '../block/blocks/Air';
-import { Attribute } from '../entity/attribute';
+import { Attribute } from '../entity/Attribute';
 import AvailableCommandsPacket from '../network/packet/AvailableCommandsPacket';
 import BatchPacket from '../network/packet/BatchPacket';
 import Block from '../block/Block';
 import Chunk from '../world/chunk/Chunk';
 import ChunkRadiusUpdatedPacket from '../network/packet/ChunkRadiusUpdatedPacket';
+import CommandData from '../network/type/CommandData';
+import CommandEnum from '../network/type/CommandEnum';
 import ContainerEntry from '../inventory/ContainerEntry';
 import CoordinateUtils from '../world/CoordinateUtils';
 import CreativeContentEntry from '../network/type/CreativeContentEntry';
@@ -35,7 +37,7 @@ import PlayerPermissionType from '../network/type/PlayerPermissionType';
 import RemoveActorPacket from '../network/packet/RemoveActorPacket';
 import type Server from '../Server';
 import SetActorDataPacket from '../network/packet/SetActorDataPacket';
-import SetGamemodePacket from '../network/packet/SetGamemodePacket';
+import SetPlayerGameTypePacket from '../network/packet/SetPlayerGameTypePacket';
 import SetTimePacket from '../network/packet/SetTimePacket';
 import TextPacket from '../network/packet/TextPacket';
 import TextType from '../network/type/TextType';
@@ -63,8 +65,18 @@ export default class PlayerConnection {
     // To refactor
     public async sendDataPacket(packet: DataPacket): Promise<void> {
         const batch = new BatchPacket();
-        batch.addPacket(packet);
-        batch.encode();
+        try {
+            batch.addPacket(packet);
+            batch.encode();
+        } catch (error) {
+            this.server
+                .getLogger()
+                ?.warn(
+                    `Packet §b${packet.constructor.name}§r to §b${this.player.getRuntimeId()}§r failed with: ${error}`,
+                    'PlayerConnection/sendDataPacket'
+                );
+            return;
+        }
 
         // Add this in raknet
         const sendPacket = new Protocol.EncapsulatedPacket();
@@ -72,6 +84,7 @@ export default class PlayerConnection {
         sendPacket.buffer = batch.getBuffer();
 
         await this.connection.addEncapsulatedToQueue(sendPacket);
+        this.server.getLogger()?.silly(`Sent §b${packet.constructor.name}§r packet`, 'PlayerConnection/sendDataPacket');
     }
 
     public async update(_tick: number): Promise<void> {
@@ -90,6 +103,11 @@ export default class PlayerConnection {
         await this.needNewChunks();
     }
 
+    /**
+     * Notify a client about change(s) to the adventure settings.
+     *
+     * @param player The client-controlled entity
+     */
     public async sendSettings(player?: Player): Promise<void> {
         const target = player ?? this.player;
         const pk = new AdventureSettingsPacket();
@@ -103,7 +121,7 @@ export default class PlayerConnection {
 
         pk.commandPermission = target.isOp() ? PermissionType.Operator : PermissionType.Normal;
         pk.playerPermission = target.isOp() ? PlayerPermissionType.Operator : PlayerPermissionType.Member;
-        pk.entityId = target.runtimeId;
+        pk.entityId = target.getRuntimeId();
         await this.sendDataPacket(pk);
     }
 
@@ -199,6 +217,17 @@ export default class PlayerConnection {
         this.chunkSendQueue.add(chunk);
     }
 
+    /**
+     * Clear the currently loaded and loading chunks.
+     *
+     * @remarks
+     * Usually used for changing dimension, world, etc.
+     */
+    public async clearChunks() {
+        this.loadedChunks.clear();
+        this.loadingChunks.clear();
+    }
+
     public async sendInventory(): Promise<void> {
         const pk = new InventoryContentPacket();
         pk.items = this.player.getInventory().getItems(true);
@@ -249,10 +278,12 @@ export default class PlayerConnection {
 
     /**
      * Sets the item in the player hand.
+     *
+     * @param item The entity.
      */
     public async sendHandItem(item: ContainerEntry): Promise<void> {
         const pk = new MobEquipmentPacket();
-        pk.runtimeEntityId = this.player.runtimeId;
+        pk.runtimeEntityId = this.player.getRuntimeId();
         pk.item = item;
         pk.inventorySlot = this.player.getInventory().getHandSlotIndex();
         pk.hotbarSlot = this.player.getInventory().getHandSlotIndex();
@@ -268,15 +299,25 @@ export default class PlayerConnection {
         await this.sendDataPacket(pk);
     }
 
-    public async sendTime(time: number): Promise<void> {
+    /**
+     * Set the client's current tick.
+     *
+     * @param tick The tick
+     */
+    public async sendTime(tick: number): Promise<void> {
         const pk = new SetTimePacket();
-        pk.time = time;
+        pk.time = tick;
         await this.sendDataPacket(pk);
     }
 
-    public async sendGamemode(mode: number): Promise<void> {
-        const pk = new SetGamemodePacket();
-        pk.gamemode = mode;
+    /**
+     * Set the client's gamemode.
+     *
+     * @param gamemode the numeric gamemode ID
+     */
+    public async sendGamemode(gamemode: number): Promise<void> {
+        const pk = new SetPlayerGameTypePacket();
+        pk.gamemode = gamemode;
         await this.sendDataPacket(pk);
     }
 
@@ -296,29 +337,32 @@ export default class PlayerConnection {
             .getCommandManager()
             .getCommandsList()
             .forEach((command) => {
-                const classCommand = Array.from(this.server.getCommandManager().getCommands().values()).find(
+                const commandClass = Array.from(this.server.getCommandManager().getCommands().values()).find(
                     (cmd) => cmd.id.split(':')[1] === command[0]
-                )!;
+                );
 
-                if (!classCommand) {
+                if (!commandClass) {
                     this.player
                         .getServer()
                         .getLogger()
-                        .warn(`Can't find corresponding command class for "${command[0]}"`);
+                        ?.warn(`Can't find corresponding command class for "${command[0]}"`);
                     return;
                 }
 
-                if (!this.player.getServer().getPermissionManager().can(this.player).execute(classCommand.permission))
+                if (!this.player.getServer().getPermissionManager().can(this.player).execute(commandClass.permission))
                     return;
 
-                if (command[1].getCommand())
-                    pk.commandData.add({
-                        name: command[0],
-                        description: classCommand.description,
-                        parameters: new Set<CommandParameter>()
-                    });
+                const cmd = new CommandData();
+                cmd.commandName = command[0];
+                cmd.commandDescription = commandClass.description;
+                if (commandClass.aliases!.length > 0) {
+                    const cmdAliases = new CommandEnum();
+                    cmdAliases.enumName = `${command[0]}Aliases`;
+                    cmdAliases.enumValues = commandClass.aliases!.concat(command[0]);
+                    cmd.aliases = cmdAliases;
+                }
 
-                command[2].forEach((arg) => {
+                command[2].forEach((arg, index) => {
                     const parameters = arg
                         .map((parameter) => {
                             const parameters = parameter?.getParameters?.();
@@ -327,61 +371,54 @@ export default class PlayerConnection {
                             if (parameter instanceof CommandArgumentEntity)
                                 return [
                                     new CommandParameter({
-                                        name: 'target',
-                                        type: CommandParameterType.Target,
-                                        optional: false
+                                        paramName: 'target',
+                                        paramType: CommandParameterType.Target
                                     })
                                 ];
 
                             if (parameter instanceof CommandArgumentGamemode)
                                 return [
                                     new CommandParameter({
-                                        name: 'gamemode',
-                                        type: CommandParameterType.String,
-                                        optional: false
+                                        paramName: 'gamemode',
+                                        paramType: CommandParameterType.String
                                     })
                                 ];
                             if (parameter.constructor.name === 'StringArgumentType')
                                 return [
-                                    new CommandParameter({
-                                        name: 'value',
-                                        type: CommandParameterType.String,
-                                        optional: false
-                                    })
+                                    new CommandParameter({ paramName: 'value', paramType: CommandParameterType.String })
                                 ];
                             if (parameter.constructor.name === 'IntegerArgumentType')
                                 return [
-                                    new CommandParameter({
-                                        name: 'number',
-                                        type: CommandParameterType.Int,
-                                        optional: false
-                                    })
+                                    new CommandParameter({ paramName: 'number', paramType: CommandParameterType.Int })
                                 ];
 
-                            this.server.getLogger().warn(`Invalid parameter ${parameter.constructor.name}`);
+                            this.server.getLogger()?.warn(`Invalid parameter ${parameter.constructor.name}`);
                             return [
-                                new CommandParameter({
-                                    name: 'value',
-                                    type: CommandParameterType.String,
-                                    optional: false
-                                })
+                                new CommandParameter({ paramName: 'value', paramType: CommandParameterType.String })
                             ];
                         })
                         .filter((a) => a)
                         .flat();
-
-                    pk.commandData.add({
-                        name: command[0],
-                        description: classCommand.description,
-                        parameters: new Set<CommandParameter>(parameters as any)
-                    });
+                    cmd.overloads[index] = parameters;
                 });
+                pk.commandData.push(cmd);
             });
-
+        const playerEnum = new CommandEnum();
+        playerEnum.enumName = 'Player';
+        playerEnum.enumValues = this.player
+            .getServer()
+            .getPlayerManager()
+            .getOnlinePlayers()
+            .map((player) => player.getName());
+        pk.softEnums = [playerEnum];
         await this.sendDataPacket(pk);
     }
 
-    // Updates the player view distance
+    /**
+     * Set the client's maximum view distance.
+     *
+     * @param distance The view distance
+     */
     public async setViewDistance(distance: number): Promise<void> {
         this.player.viewDistance = distance;
         const pk = new ChunkRadiusUpdatedPacket();
@@ -391,7 +428,7 @@ export default class PlayerConnection {
 
     public async sendAttributes(attributes: Attribute[]): Promise<void> {
         const pk = new UpdateAttributesPacket();
-        pk.runtimeEntityId = this.player.runtimeId;
+        pk.runtimeEntityId = this.player.getRuntimeId();
         pk.attributes = attributes ?? this.player.getAttributeManager().getAttributes();
         pk.tick = BigInt(0); // TODO
         await this.sendDataPacket(pk);
@@ -399,17 +436,28 @@ export default class PlayerConnection {
 
     public async sendMetadata(): Promise<void> {
         const pk = new SetActorDataPacket();
-        pk.runtimeEntityId = this.player.runtimeId;
-        pk.metadata = this.player.getMetadataManager().getMetadata();
+        pk.runtimeEntityId = this.player.getRuntimeId();
+        pk.metadata = this.player.getMetadataManager();
         pk.tick = BigInt(0); // TODO
         await this.sendDataPacket(pk);
     }
 
-    public async sendMessage(message: string, xuid = '', needsTranslation = false): Promise<void> {
+    /**
+     * Send a chat message to the client.
+     *
+     * @remarks
+     * Refactor this completely.
+     *
+     * @param message The message
+     * @param xuid The source xuid
+     * @param needsTranslation If the TextType requires translation
+     * @param type The text type
+     */
+    public async sendMessage(message: string, xuid = '', needsTranslation = false, type = TextType.Raw): Promise<void> {
         if (!message) throw new Error('A message is required');
 
         const pk = new TextPacket();
-        pk.type = TextType.Raw;
+        pk.type = type;
         pk.message = message;
         pk.needsTranslation = needsTranslation;
         pk.xuid = xuid;
@@ -435,7 +483,7 @@ export default class PlayerConnection {
      */
     public async broadcastMove(player: Player, mode = MovementType.Normal): Promise<void> {
         const pk = new MovePlayerPacket();
-        pk.runtimeEntityId = player.runtimeId;
+        pk.runtimeEntityId = player.getRuntimeId();
 
         pk.positionX = player.getX();
         pk.positionY = player.getY();
@@ -463,7 +511,7 @@ export default class PlayerConnection {
 
         const entry = new PlayerListEntry({
             uuid: UUID.fromString(this.player.uuid),
-            uniqueEntityid: this.player.runtimeId,
+            uniqueEntityid: this.player.getRuntimeId(),
             name: this.player.getName(),
             xuid: this.player.xuid,
             platformChatId: '', // TODO: read this value from Login
@@ -535,13 +583,13 @@ export default class PlayerConnection {
      */
     public async sendSpawn(player: Player): Promise<void> {
         if (!player.getUUID()) {
-            this.server.getLogger().error(`UUID for player ${player.getName()} is undefined`);
+            this.server.getLogger()?.error(`UUID for player ${player.getName()} is undefined`);
             return;
         }
 
         const pk = new AddPlayerPacket();
         pk.uuid = UUID.fromString(this.player.getUUID()); // TODO: temp solution
-        pk.runtimeEntityId = this.player.runtimeId;
+        pk.runtimeEntityId = this.player.getRuntimeId();
         pk.name = this.player.getName();
 
         pk.positionX = this.player.getX();
@@ -560,7 +608,7 @@ export default class PlayerConnection {
         pk.item = this.player.getInventory()?.getItemInHand() ?? new ContainerEntry({ item: new Air(), count: 0 });
 
         pk.deviceId = this.player.device?.id ?? '';
-        pk.metadata = this.player.getMetadataManager().getMetadata();
+        pk.metadata = this.player.getMetadataManager();
         await player.getConnection().sendDataPacket(pk);
         await this.sendSettings(player);
     }
@@ -570,7 +618,7 @@ export default class PlayerConnection {
      */
     public async sendDespawn(player: Player): Promise<void> {
         const pk = new RemoveActorPacket();
-        pk.uniqueEntityId = this.player.runtimeId; // We use runtime as unique
+        pk.uniqueEntityId = this.player.getRuntimeId(); // We use runtime as unique
         await player.getConnection().sendDataPacket(pk);
     }
 

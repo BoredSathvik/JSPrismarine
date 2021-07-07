@@ -6,8 +6,20 @@ import { ItemTieredToolType } from '../item/ItemTieredToolType';
 import Server from '../Server';
 
 export default class Block {
+    /**
+     * The block's numeric block ID.
+     */
     public id: number;
+
+    /**
+     * The block's namespaced block ID.
+     */
     public name: string;
+
+    /**
+     * The block's java-edition namespaced block ID.
+     */
+    public javaName: string;
     public hardness: number;
     public meta = 0;
     private networkId: number;
@@ -19,60 +31,65 @@ export default class Block {
     public constructor({
         id,
         name,
+        javaName,
         parentName,
         hardness
     }: {
         id: number;
         name: string;
+        javaName?: string;
         parentName?: string;
         hardness?: number;
     }) {
         this.id = id;
         this.name = name;
         this.hardness = hardness ?? 0;
+        this.name = name;
+        this.javaName = javaName ?? name;
 
-        this.networkId = BlockIdMap[parentName ?? name];
-        // if (!this.networkId)
-        //    console.log(name, id, this.networkId);
+        this.networkId = BlockIdMap[parentName ?? name] as number;
+        // if (!this.networkId) console.log(name, id, this.networkId);
     }
 
     /**
-     * Get the Block's namespaced id
+     * Get the Block's namespaced id.
      */
     public getName() {
         return this.name;
     }
 
     /**
-     * Get the Block's meta value
+     * Get the Block's meta value.
      */
     public getMeta() {
         return this.meta;
     }
 
     /**
-     * Get the Block's numeric id
+     * Get the Block's numeric id.
+     *
+     * @returns The block's numeric ID.
      */
     public getId() {
         return this.id;
     }
 
     /**
-     * Get the Block's network numeric id
+     * Get the Block's network numeric id.
      */
     public getNetworkId() {
         return this.networkId ?? this.getId();
     }
 
     /**
-     * Get the Block's hardness value
+     * Get the Block's hardness value.
      */
-    public getHardness() {
+    public getHardness(): number {
         return this.hardness;
     }
 
     /**
-     * Get the Block's break time
+     * Get the Block's break time.
      */
     public getBreakTime(item: Item | null, server: Server) {
         return this.getHardness(); // TODO: Fix break time calculations
@@ -84,53 +101,53 @@ export default class Block {
     }
 
     /**
-     * Get the Block's blast resistance
+     * Get the Block's blast resistance.
      */
     public getBlastResistance() {
         return this.getHardness() * 5;
     }
 
     /**
-     * Get the Block's light level emission
+     * Get the Block's light level emission.
      */
     public getLightLevel() {
         return 0;
     }
 
     /**
-     * Get the Block's flammability
+     * Get the Block's flammability.
      */
     public getFlammability() {
         return 0;
     }
 
     /**
-     * Get the Block's required tool type
+     * Get the Block's required tool type.
      */
-    public getToolType(): BlockToolType {
-        return BlockToolType.None;
+    public getToolType(): BlockToolType[] {
+        return [BlockToolType.None];
     }
 
     /**
-     * Get the Block's required item tool tier
+     * Get the Block's required item tool tier.
      */
     public getToolHarvestLevel(): ItemTieredToolType {
         return ItemTieredToolType.None;
     }
 
     /**
-     * Get the Block's drop(s) if the tool is compatible
+     * Get the Block's drop(s) if the tool is compatible.
      */
-    public getDropsForCompatibleTool(item: Item, server: Server): Array<Block | Item | null> {
+    public getDropsForCompatibleTool(item: Item | null, server: Server): Array<Block | Item | null> {
         return [this];
     }
 
     /**
-     * Get the Block's drop(s) from the current item
+     * Get the Block's drop(s) from the current item.
      */
-    public getDrops(item: Item, server: Server): Array<Block | Item | null> {
+    public getDrops(item: Item | null, server: Server): Array<Block | Item | null> {
         if (this.isCompatibleWithTool(item)) {
-            if (this.isAffectedBySilkTouch() && item.hasEnchantment(ItemEnchantmentType.SilkTouch))
+            if (this.isAffectedBySilkTouch() && item?.hasEnchantment(ItemEnchantmentType.SilkTouch))
                 return this.getSilkTouchDrops(item, server);
 
             return this.getDropsForCompatibleTool(item, server);
@@ -140,7 +157,7 @@ export default class Block {
     }
 
     /**
-     * Get the Block's drop(s) if silk touch is used
+     * Get the Block's drop(s) if silk touch is used.
      */
     public getSilkTouchDrops(item: Item, server: Server) {
         return [this];
@@ -155,7 +172,7 @@ export default class Block {
     }
 
     /**
-     * Sets if the block can be replaced when place action occurs on it
+     * Sets if the block can be replaced when place action occurs on it.
      */
     public canBeReplaced() {
         return false;
@@ -173,25 +190,31 @@ export default class Block {
         return false;
     }
 
-    public isBreakable() {
+    /**
+     * Check if the block is breakable.
+     *
+     * @returns `true` if the block is breakable otherwise `false`.
+     */
+    public isBreakable(): boolean {
         return true;
     }
 
+    /**
+     * Check if the block is solid.
+     *
+     * @returns `true` if the block is solid otherwise `false`.
+     */
     public isSolid() {
         return false;
     }
 
     public isCompatibleWithTool(item: Item | null) {
-        if (!item) return false;
-
-        if (this.getHardness() < 0) return false;
-
         const toolType = this.getToolType();
         const harvestLevel = this.getToolHarvestLevel();
 
-        if (toolType === BlockToolType.None || harvestLevel === 0) return true;
-        if (toolType & item.getToolType() && item.getToolHarvestLevel() >= harvestLevel) return true;
-
+        if (toolType.includes(BlockToolType.None) || harvestLevel <= 0) return true;
+        if (!item) return false;
+        if (toolType.includes(item.getToolType()) && item.getToolHarvestLevel() >= harvestLevel) return true;
         return false;
     }
 

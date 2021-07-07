@@ -1,28 +1,27 @@
-import InventoryTransactionPacket, {
-    InventoryTransactionType,
-    InventoryTransactionUseItemActionType
-} from '../packet/InventoryTransactionPacket';
+import { InventoryTransactionPacket, LevelSoundEventPacket, UpdateBlockPacket } from '../Packets';
+import { InventoryTransactionType, InventoryTransactionUseItemActionType } from '../packet/InventoryTransactionPacket';
 
 import BlockMappings from '../../block/BlockMappings';
 import ContainerEntry from '../../inventory/ContainerEntry';
 import Gamemode from '../../world/Gamemode';
-import LevelSoundEventPacket from '../packet/LevelSoundEventPacket';
+import Identifiers from '../Identifiers';
+import { Item } from '../../entity/Entities';
 import PacketHandler from './PacketHandler';
 import type Player from '../../player/Player';
 import type Server from '../../Server';
-import UpdateBlockPacket from '../packet/UpdateBlockPacket';
 import Vector3 from '../../math/Vector3';
 
 export default class InventoryTransactionHandler implements PacketHandler<InventoryTransactionPacket> {
+    public static NetID = Identifiers.InventoryTransactionPacket;
+
     public async handle(packet: InventoryTransactionPacket, server: Server, player: Player): Promise<void> {
-        if (player.gamemode === Gamemode.Spectator) return; // Spectators shouldn't be able to interact with the world
+        if (!player.isOnline()) return;
+        if (player.gamemode === Gamemode.Spectator) return; // Spectators shouldn't be able to interact with the world.
 
         switch (packet.type) {
             case InventoryTransactionType.Normal: {
-                // TODO: refactor this crap
-                // <rant> probably base it on https://github.com/pmmp/PocketMine-MP/blob/d19db5d2e44d0925798c288247c3bddb71d23975/src/pocketmine/Player.php#L2399 or something smilar
-                // I'm apparently too dumb to figure out how this works. Or maybe I'm just tiered.
-                // anyways, fuck 2020. yay 2021. </rant>
+                // TODO: refactor this crap.
+                // probably base it on https://github.com/pmmp/PocketMine-MP/blob/d19db5d2e44d0925798c288247c3bddb71d23975/src/pocketmine/Player.php#L2399 or something similar.
                 let movedItem: ContainerEntry;
                 packet.actions.forEach(async (action) => {
                     switch (action.sourceType) {
@@ -56,7 +55,7 @@ export default class InventoryTransactionHandler implements PacketHandler<Invent
                             if (!movedItem) {
                                 server
                                     .getLogger()
-                                    .debug(`movedItem is undefined`, 'InventoryTransactionHandler/handle/Normal');
+                                    ?.debug(`movedItem is undefined`, 'InventoryTransactionHandler/handle/Normal');
                                 return;
                             }
 
@@ -66,7 +65,7 @@ export default class InventoryTransactionHandler implements PacketHandler<Invent
                         default:
                             server
                                 .getLogger()
-                                .debug(
+                                ?.debug(
                                     `Unknown source type: ${action.sourceType}`,
                                     'InventoryTransactionHandler/handle/Normal'
                                 );
@@ -82,7 +81,7 @@ export default class InventoryTransactionHandler implements PacketHandler<Invent
                             .useItemOn(
                                 server
                                     .getBlockManager()
-                                    .getBlockByIdAndMeta(packet.itemInHand.id, packet.itemInHand.meta),
+                                    .getBlockByIdAndMeta(packet.itemInHand.getId(), packet.itemInHand.meta),
                                 packet.blockPosition,
                                 packet.face,
                                 packet.clickPosition,
@@ -103,6 +102,7 @@ export default class InventoryTransactionHandler implements PacketHandler<Invent
                         );
 
                         const blockId = chunk.getBlock(chunkPos.getX(), chunkPos.getY(), chunkPos.getZ());
+                        const block = server.getBlockManager().getBlockByIdAndMeta(blockId.id, blockId.meta);
 
                         const pk = new UpdateBlockPacket();
                         pk.x = packet.blockPosition.getX();
@@ -110,14 +110,41 @@ export default class InventoryTransactionHandler implements PacketHandler<Invent
                         pk.z = packet.blockPosition.getZ();
                         // TODO: run a function from block.getBreakConsequences() because
                         // the broken block may place more blocks or run block related code
+                        // for example, ice should replace itself with a water source block
+                        // in survival
                         pk.blockRuntimeId = BlockMappings.getRuntimeId(0, 0); // Air
 
+                        // Send block-break packet to all players in the same world
                         await Promise.all(
                             server
                                 .getPlayerManager()
                                 .getOnlinePlayers()
+                                .filter((p) => p.getWorld().getUniqueId() === player.getWorld().getUniqueId())
                                 .map(async (player) => player.getConnection().sendDataPacket(pk))
                         );
+
+                        // Spawn item if player isn't in creative
+                        if (player.getGamemode() !== 'creative') {
+                            // TODO: use iteminhand
+                            const drops = block.getDrops(null, server);
+
+                            await Promise.all(
+                                drops.map(async (block) => {
+                                    if (!block) return;
+
+                                    const droppedItem = new Item(
+                                        player.getWorld(),
+                                        server,
+                                        new ContainerEntry({
+                                            item: block,
+                                            count: 1
+                                        })
+                                    );
+                                    await player.getWorld().addEntity(droppedItem);
+                                    await droppedItem.setPosition(packet.blockPosition);
+                                })
+                            );
+                        }
 
                         chunk.setBlock(
                             chunkPos.getX(),
@@ -152,13 +179,13 @@ export default class InventoryTransactionHandler implements PacketHandler<Invent
                     default:
                         server
                             .getLogger()
-                            .debug(`Unknown action type: ${packet.actionType}`, 'InventoryTransactionHandler/handle');
+                            ?.debug(`Unknown action type: ${packet.actionType}`, 'InventoryTransactionHandler/handle');
                 }
 
                 break;
             }
             default: {
-                server.getLogger().debug(`Unknown type: ${packet.type}`, 'InventoryTransactionHandler/handle');
+                server.getLogger()?.verbose(`Unknown type: ${packet.type}`, 'InventoryTransactionHandler/handle');
                 throw new Error('Invalid InventoryTransactionType');
             }
         }

@@ -13,11 +13,10 @@ jobs:
                   node-version: 14
             - run: npm install -g npm@latest
             - run: npm install -g lerna
-            - run: lerna bootstrap
+            - run: lerna bootstrap --concurrency=1
             - run: npm install
             - run: npm run build
-            - run: npm run test
-            - run: npm build
+            - run: npm run test:jest
     linux-test:
         runs-on: ubuntu-latest
         steps:
@@ -27,8 +26,7 @@ jobs:
                   node-version: 14
             - run: npm install -g npm@latest
             - run: npm install -g lerna
-            - run: lerna bootstrap
+            - run: lerna bootstrap --concurrency=1
             - run: npm install
             - run: npm run build
-            - run: npm run test
-            - run: npm build
+            - run: npm run test:jest

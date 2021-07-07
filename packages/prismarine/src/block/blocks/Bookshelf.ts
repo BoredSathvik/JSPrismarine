@@ -1,5 +1,7 @@
 import { BlockIdsType } from '../BlockIdsType';
 import { BlockToolType } from '../BlockToolType';
+import type Item from '../../item/Item';
+import type Server from '../../Server';
 import Solid from '../Solid';
 
 export default class Bookshelf extends Solid {
@@ -11,8 +13,12 @@ export default class Bookshelf extends Solid {
         });
     }
 
+    public getDropsForCompatibleTool(item: Item, server: Server) {
+        return [server.getItemManager().getItem('minecraft:book')];
+    }
+
     public getToolType() {
-        return BlockToolType.Axe;
+        return [BlockToolType.Axe];
     }
 
     public getFlammability() {

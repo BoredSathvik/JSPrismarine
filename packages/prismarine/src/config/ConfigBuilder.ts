@@ -54,8 +54,11 @@ const TypeDefaults = {
     yaml: ' '
 };
 
+/**
+ * General config-file handler.
+ */
 export default class ConfigBuilder {
-    private type: string;
+    private type: 'yaml' | 'json';
     private path: string;
 
     /**
@@ -64,7 +67,7 @@ export default class ConfigBuilder {
     public constructor(filePath: string) {
         const pathSplitted = path.parse(filePath);
 
-        this.type = pathSplitted.ext.slice(1);
+        this.type = pathSplitted.ext.slice(1) as 'yaml' | 'json';
 
         if (!Object.keys(TypeDefaults).some((i) => i.toLowerCase() === this.type.toLowerCase())) {
             throw new Error(`Unsupported config type. (Supported types: ${Object.keys(TypeDefaults).join(', ')})`);
@@ -81,11 +84,21 @@ export default class ConfigBuilder {
         this.path = filePath;
     }
 
+    /**
+     * Get path to the config file on the filesystem.
+     *
+     * @returns the path to the config file
+     */
     public getPath(): string {
         return this.path;
     }
 
-    public getType(): string {
+    /**
+     * Get the config format (eg. type).
+     *
+     * @returns either `yaml` or `json`
+     */
+    public getType(): 'yaml' | 'json' {
         return this.type;
     }
 
@@ -123,12 +136,17 @@ export default class ConfigBuilder {
     }
 
     /**
-     * Returns the value of the key.
+     * Get a config value from a key.
+     *
+     * @param key the config key
+     * @param defaults the default value, optional
+     *
+     * @returns the config value
      */
-    public get(key: string, defaults: any): any {
+    public get(key: string, defaults?: any): any {
         const data = this.getFileData();
         let result = _.get(data, key);
-        if (typeof result === 'undefined' && typeof defaults !== 'undefined') {
+        if (defaults && typeof result === 'undefined' && typeof defaults !== 'undefined') {
             const newData = _.set(data, key, defaults);
             this.setFileData(newData);
             result = defaults;
@@ -139,16 +157,23 @@ export default class ConfigBuilder {
 
     /**
      * Sets a key - value pair in config.
+     *
+     * @returns true if the value was set successfully
      */
     public set(key: string, value: any) {
         const data = this.getFileData();
         const newData = _.set(data, key, value);
         this.setFileData(newData);
+
+        // TODO
+        return true;
     }
 
     /**
-     * Returns true if the config
-     * contains that key.
+     * Check if config value exists.
+     *
+     * @param key the config key
+     * @returns true if the config contains that key
      */
     public has(key: string): boolean {
         const data = this.getFileData();
@@ -157,8 +182,10 @@ export default class ConfigBuilder {
     }
 
     /**
-     * Returns true if the
-     * deletion was successful.
+     * Delete a config value.
+     *
+     * @param key the config key
+     * @returns true if the deletion was successful
      */
     public del(key: string): boolean {
         const data = this.getFileData();

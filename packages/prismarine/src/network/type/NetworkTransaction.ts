@@ -1,3 +1,4 @@
+import Item from '../../item/Item';
 import NetworkTransactionSourceType from './NetworkTransactionSourceType';
 import type PacketBinaryStream from '../PacketBinaryStream';
 
@@ -30,12 +31,12 @@ class NetworkTransaction {
             default:
             //    This.server
             //        .getLogger()
-            //        .warn(`Unknown source type ${this.sourceType}`);
+            //        ?.warn(`Unknown source type ${this.sourceType}`);
         }
 
         this.slot = buffer.readUnsignedVarInt();
-        this.oldItem = buffer.readItemStack();
-        this.newItem = buffer.readItemStack();
+        this.oldItem = Item.networkDeserialize(buffer);
+        this.newItem = Item.networkDeserialize(buffer);
 
         if (hasItemStack) {
             this.newItemStackId = buffer.readVarInt();

@@ -23,6 +23,7 @@ export default class Config {
     private packetCompressionLevel!: number;
     private updateRepo!: string;
     private updateChannel!: string;
+    private experimentalFlags!: string[];
 
     public constructor(version: string) {
         this.version = version;
@@ -33,28 +34,29 @@ export default class Config {
         this.configBuilder = new ConfigBuilder(path.join(cwd(), 'config.yaml'));
         (global as any).log_level = this.configBuilder.get('log-level', 'info');
 
-        this.port = this.configBuilder.get('port', 19132);
-        this.serverIp = this.configBuilder.get('server-ip', '0.0.0.0');
-        this.levelName = this.configBuilder.get('level-name', 'world');
+        this.port = this.configBuilder.get('port', 19132) as number;
+        this.serverIp = this.configBuilder.get('server-ip', '0.0.0.0') as string;
+        this.levelName = this.configBuilder.get('level-name', 'world') as string;
         this.worlds = this.configBuilder.get('worlds', {
             world: {
                 generator: 'overworld',
-                provider: 'LevelDB',
+                provider: 'Filesystem',
                 seed: SeedGenerator()
             }
         });
-        this.maxPlayers = this.configBuilder.get('max-players', 20);
-        this.gamemode = this.configBuilder.get('gamemode', 'survival');
-        this.motd = this.configBuilder.get('motd', 'Another JSPrismarine server!');
-        this.viewDistance = this.configBuilder.get('view-distance', 10);
-        this.onlineMode = this.configBuilder.get('online-mode', true);
-        this.enableEval = this.configBuilder.get('enable-eval', false);
-        this.enableTelemetry = this.configBuilder.get('enable-telemetry', true);
-        this.telemetryUrls = this.configBuilder.get('telemetry-urls', ['https://telemetry.prismarine.dev']);
-        this.packetCompressionLevel = this.configBuilder.get('packet-compression-level', 7);
+        this.maxPlayers = this.configBuilder.get('max-players', 20) as number;
+        this.gamemode = this.configBuilder.get('gamemode', 'survival') as string;
+        this.motd = this.configBuilder.get('motd', 'Another JSPrismarine server!') as string;
+        this.viewDistance = this.configBuilder.get('view-distance', 10) as number;
+        this.onlineMode = this.configBuilder.get('online-mode', true) as boolean;
+        this.enableEval = this.configBuilder.get('enable-eval', false) as boolean;
+        this.enableTelemetry = this.configBuilder.get('enable-telemetry', true) as boolean;
+        this.telemetryUrls = this.configBuilder.get('telemetry-urls', ['https://telemetry.prismarine.dev']) as string[];
+        this.packetCompressionLevel = this.configBuilder.get('packet-compression-level', 7) as number;
+        this.experimentalFlags = this.configBuilder.get('experimental-flags', []) as string[];
 
-        this.updateRepo = this.configBuilder.get('update-repo', 'JSPrismarine/JSPrismarine');
-        this.updateChannel = this.configBuilder.get('update-channel', 'release');
+        this.updateRepo = this.configBuilder.get('update-repo', 'JSPrismarine/JSPrismarine') as string;
+        this.updateChannel = this.configBuilder.get('update-channel', 'release') as string;
     }
 
     public onDisable() {}
@@ -63,22 +65,35 @@ export default class Config {
         return this.version;
     }
 
-    public getPort() {
+    public getPort(): number {
         return this.port;
     }
 
-    public getServerIp() {
+    public getServerIp(): string {
         return this.serverIp;
     }
 
-    public getLevelName() {
+    /**
+     * Returns the default world's name (`id`).
+     *
+     * @remarks
+     * If the world doesn't exist as a part of the `worlds` array the `worldManager` will
+     * fail to initialize.
+     *
+     * @returns The world's name as a `string`
+     */
+    public getLevelName(): string {
         return this.levelName;
     }
 
-    public getWorlds() {
+    public getWorlds(): any {
         return this.worlds;
     }
 
+    /**
+     *
+     * @returns The max amount of players allowed onto the server at the same time.
+     */
     public getMaxPlayers() {
         return this.maxPlayers;
     }
@@ -86,27 +101,72 @@ export default class Config {
     public getGamemode() {
         return this.gamemode;
     }
-    public setGamemode(gamemode: number) {
+
+    /**
+     * Set the default gamemode.
+     *
+     * @param gamemode the gamemode
+     * @param commit if the value should be written to the `config.yml` file
+     */
+    public setGamemode(gamemode: number, commit = false) {
         this.gamemode = Gamemode.getGamemodeName(gamemode).toLowerCase();
-        this.configBuilder.set('gamemode', this.gamemode);
+
+        if (commit) this.configBuilder.set('gamemode', this.gamemode);
     }
 
-    public getMotd() {
+    /**
+     * Returns true or false depending on if online mode is enabled.
+     *
+     * @returns The message of the day as a `string`
+     */
+    public getMotd(): string {
         return this.motd;
     }
 
-    public getViewDistance() {
-        return this.viewDistance;
+    /**
+     * Set the motd.
+     *
+     * @param motd the gamemode
+     * @param commit if the value should be written to the `config.yml` file
+     */
+    public setMotd(motd: string, commit = false) {
+        this.motd = motd;
+
+        if (commit) this.configBuilder.set('motd', this.motd);
     }
 
-    public getOnlineMode() {
+    /**
+     * Returns the view distance.
+     *
+     * @returns The view distance as an `integer`
+     */
+    public getViewDistance(): number {
+        return Math.round(this.viewDistance); // Make sure it's always an integer
+    }
+
+    /**
+     * Returns true or false depending on if online mode is enabled.
+     *
+     * @returns `true` if enabled, `false` otherwise
+     */
+    public getOnlineMode(): boolean {
         return this.onlineMode;
     }
 
-    public getEnableEval() {
+    /**
+     * Returns true or false depending on if the `/eval` is enabled.
+     *
+     * @returns `true` if enabled, `false` otherwise
+     */
+    public getEnableEval(): boolean {
         return this.enableEval;
     }
 
+    /**
+     * If telemetry is enabled and which urls/backends to send data to.
+     *
+     * @returns An `object` containing the status of telemetry and the urls which should be reported to.
+     */
     public getTelemetry() {
         return {
             enabled: this.enableTelemetry,
@@ -124,5 +184,9 @@ export default class Config {
 
     public getUpdateChannel() {
         return this.updateChannel;
+    }
+
+    public getExperimentalFlags() {
+        return this.experimentalFlags;
     }
 }

@@ -13,10 +13,10 @@ jobs:
                   node-version: 14
             - run: npm install -g npm@latest
             - run: npm install -g lerna
-            - run: lerna bootstrap
+            - run: lerna bootstrap --concurrency=1
             - run: npm install
-            - run: npm run build
-            - run: npm run eslint
+            - run: npm run build:source
+            - run: npm run test:eslint
     lint-prettier:
         runs-on: ubuntu-latest
         steps:
@@ -26,10 +26,10 @@ jobs:
                   node-version: 14
             - run: npm install -g npm@latest
             - run: npm install -g lerna
-            - run: lerna bootstrap
+            - run: lerna bootstrap --concurrency=1
             - run: npm install
-            - run: npm run build
-            - run: npm run prettier
+            - run: npm run build:source
+            - run: npm run test:prettier
     lint-coveralls:
         runs-on: ubuntu-latest
         steps:
@@ -39,9 +39,9 @@ jobs:
                   node-version: 14
             - run: npm install -g npm@latest
             - run: npm install -g lerna
-            - run: lerna bootstrap
+            - run: lerna bootstrap --concurrency=1
             - run: npm install
-            - run: npm run build
+            - run: npm run build:source
             - run: npm run coveralls
             - name: Coveralls
               uses: coverallsapp/github-action@master

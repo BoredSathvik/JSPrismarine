@@ -6,7 +6,7 @@ import BlockMappings from '../block/BlockMappings';
 import Chunk from './chunk/Chunk';
 import CoordinateUtils from './CoordinateUtils';
 import DataPacket from '../network/packet/DataPacket';
-import Entity from '../entity/entity';
+import Entity from '../entity/Entity';
 import Gamemode from './Gamemode';
 import Generator from './Generator';
 import Item from '../item/Item';
@@ -25,12 +25,18 @@ import path from 'path';
 
 interface WorldData {
     name: string;
+    path: string;
     server: Server;
     provider: any;
     seed: number;
     generator: Generator;
+    config?: any;
 }
 
+export interface LevelMeta {
+    spawn: Vector3;
+    gameRules: Array<[string, any]>;
+}
 export interface WorldPlayerData {
     gamemode: string;
     position: {
@@ -52,8 +58,8 @@ export interface WorldPlayerData {
 export default class World {
     private readonly uniqueId: string = UUID.randomString();
     private name: string;
+    private path: string;
 
-    private readonly players: Map<bigint, Player> = new Map();
     private readonly entities: Map<bigint, Entity> = new Map();
     private readonly chunks: Map<string, Chunk> = new Map();
     private readonly gameruleManager: GameruleManager;
@@ -62,44 +68,78 @@ export default class World {
     private readonly server: Server;
     private readonly seed: number;
     private readonly generator: Generator;
+    private readonly config: Object;
+    private spawn: Vector3 | null = null;
 
-    public constructor({ name, server, provider, seed, generator }: WorldData) {
+    public constructor({ name, server, path: levelPath, provider, seed, generator, config }: WorldData) {
         this.name = name;
+        this.path = levelPath;
         this.server = server;
         this.provider = provider;
         this.gameruleManager = new GameruleManager(server);
         this.seed = seed;
         this.generator = generator;
+        this.config = config ?? {};
 
-        // TODO: Load default gamrules
-        // TODO: getGameruleManager().showCoordinates(true ?? false);
-        this.getGameruleManager().setGamerule(GameRules.DoDayLightCycle, true);
-        this.getGameruleManager().setGamerule(GameRules.ShowCoordinates, true);
+        this.gameruleManager.setGamerule(GameRules.ShowCoordinates, true);
 
         // Create player data folder
-        if (!fs.existsSync(path.join(cwd(), 'worlds', name, '/players'))) {
-            fs.mkdirSync(path.join(cwd(), 'worlds', name, '/players'));
+        if (!fs.existsSync(path.join(cwd(), 'worlds', name, '/playerdata'))) {
+            fs.mkdirSync(path.join(cwd(), 'worlds', name, '/playerdata'));
         }
     }
 
     public async onEnable(): Promise<void> {
+        this.server.getEventManager().on('tick', async (evt) => this.update(evt.getTick()));
+
+        // TODO: properly read level.json
+        /* try {
+            const metaData: LevelMeta = JSON.parse(
+                await fs.promises.readFile(path.join(this.path, 'level.json'), 'utf-8')
+            );
+
+            // if (metaData.spawn) this.setSpawnPosition(metaData.spawn);
+
+            if (metaData.gameRules)
+                metaData.gameRules.forEach(([name, value]) => this.gameruleManager.setGamerule(name, value));
+        } catch {} */
+
+        this.provider.setWorld(this);
+        await this.provider.onEnable();
+
         this.server
             .getLogger()
-            .info(
+            ?.info(
                 `Preparing start region for dimension §b'${this.name}'/${this.generator.constructor.name}§r`,
                 'World/onEnable'
             );
-        const chunksToLoad: Array<Promise<void>> = [];
+        const chunksToLoad: Array<Promise<Chunk>> = [];
         const timer = new Timer();
 
-        for (let x = 0; x < 32; x++) {
-            for (let z = 0; z < 32; z++) {
-                chunksToLoad.push(this.loadChunk(x, z));
+        const size = this.server.getConfig().getViewDistance() * 5;
+        for (let x = 0; x < size; x++) {
+            for (let z = 0; z < size; z++) {
+                chunksToLoad.push(this.loadChunk(x, z, true));
             }
         }
 
         await Promise.all(chunksToLoad);
-        this.server.getLogger().debug(`(took ${timer.stop()} ms)`, 'World/onEnable');
+        this.server.getLogger()?.verbose(`(took ${timer.stop()} ms)`, 'World/onEnable');
+    }
+
+    public async onDisable() {
+        await fs.promises.writeFile(
+            path.join(this.path, 'level.json'),
+            JSON.stringify(
+                {
+                    spawn: await this.getSpawnPosition(),
+                    gamerules: Array.from(this.getGameruleManager().getGamerules())
+                },
+                null,
+                4
+            )
+        );
+        await this.provider.onDisable();
     }
 
     public getGenerator(): Generator {
@@ -109,23 +149,12 @@ export default class World {
     /**
      * Called every tick.
      *
-     * @param timestamp
+     * @param tick
      */
-    public async update(timestamp: number): Promise<void> {
+    public async update(tick: number): Promise<void> {
         // Auto save every 2 minutes
         if (this.currentTick / 20 === 2 * 60) {
             await this.save();
-        }
-
-        // Tick players
-        for (const player of this.players.values()) {
-            await player.update(timestamp);
-            // TODO: get documentation about timings from vanilla
-            // 1 second / 20 = 1 tick, 20 * 5 = 1 second
-            // 1 second * 60 = 1 minute
-            if (this.currentTick % (20 * 5 * 60 * 1) === 0) {
-                await player.getConnection().sendTime(this.currentTick);
-            }
         }
 
         // TODO: tick chunks
@@ -153,9 +182,8 @@ export default class World {
      */
     public async getChunk(cx: number, cz: number): Promise<Chunk> {
         const index = CoordinateUtils.encodePos(cx, cz);
-        if (!this.chunks.has(index)) {
-            await this.loadChunk(cx, cz);
-        }
+        if (!this.chunks.has(index)) return this.loadChunk(cx, cz);
+
         return this.chunks.get(index)!;
     }
 
@@ -165,17 +193,20 @@ export default class World {
      * @param cx
      * @param cz
      */
-    public async loadChunk(cx: number, cz: number): Promise<void> {
+    public async loadChunk(cx: number, cz: number, ignoreWarn?: boolean): Promise<Chunk> {
         const index = CoordinateUtils.encodePos(cx, cz);
         // Try - catch for provider errors
-        const chunk = await this.provider.readChunk(cx, cz, this.seed, this.generator);
+        const chunk = await this.provider.readChunk(cx, cz, this.seed, this.generator, this.config);
         this.chunks.set(index, chunk);
+
+        // TODO: event here, eg onChunkLoad
+        return chunk;
     }
 
     /**
      * Sends a world event packet to all the viewers in the position chunk.
      *
-     * @param position - world positon
+     * @param position - world position
      * @param worldEvent - event identifier
      * @param data
      */
@@ -191,10 +222,8 @@ export default class World {
         }
     }
 
-    // Public playSound()
-
     /**
-     * Returns a chunk from minecraft block positions x and z.
+     * Returns a chunk from a block position's x and z coordinates.
      */
     public async getChunkAt(bx: number, bz: number): Promise<Chunk> {
         return this.getChunk(bx >> 4, bz >> 4);
@@ -204,6 +233,8 @@ export default class World {
      * Returns the world default spawn position.
      */
     public async getSpawnPosition(): Promise<Vector3> {
+        if (this.spawn) return this.spawn;
+
         const x = 0;
         const z = 0; // TODO: replace with actual data
         const chunk = await this.getChunkAt(x, z);
@@ -211,8 +242,16 @@ export default class World {
         return new Vector3(z, y + 2, z);
     }
 
-    public broadcastPacket(packet: DataPacket, targets?: Player[]): void {}
+    /**
+     * Set the world's spawn position.
+     *
+     * @param pos The position as a `Vector3`.
+     */
+    public setSpawnPosition(pos: Vector3) {
+        this.spawn = pos;
+    }
 
+    // TODO: move this?
     public async useItemOn(
         itemInHand: Item | Block | null,
         blockPosition: Vector3,
@@ -274,7 +313,7 @@ export default class World {
                 resolve(true);
                 return;
             } catch (error) {
-                player.getServer().getLogger().warn(`${player.getName()} failed to place block due to ${error}`);
+                player.getServer().getLogger()?.warn(`${player.getName()} failed to place block due to ${error}`);
                 await player.sendMessage(error?.message);
 
                 resolve(false);
@@ -327,18 +366,30 @@ export default class World {
     public async sendTime(): Promise<void> {
         // Try to send it at the same time to all
         await Promise.all(
-            Array.from(this.players.values()).map(async (player) => player.getConnection().sendTime(this.getTicks()))
+            this.getEntities()
+                .filter((e) => e.isPlayer())
+                .map(async (player) => (player as Player).getConnection().sendTime(this.getTicks()))
         );
     }
 
     /**
-     * Adds an entity into the level and in the chunk
-     * found from the entity position.
+     * Adds an entity to the level.
      */
     public async addEntity(entity: Entity): Promise<void> {
-        this.entities.set(entity.runtimeId, entity);
+        if (!entity.isPlayer()) await entity.sendSpawn();
+
+        this.entities.set(entity.getRuntimeId(), entity);
         // const chunk = await this.getChunkAt(entity.getX(), entity.getZ(), true);
         // chunk.addEntity(entity as any);
+    }
+
+    /**
+     * Removes an entity from the level.
+     */
+    public async removeEntity(entity: Entity): Promise<void> {
+        if (!entity.isPlayer()) await entity.sendDespawn();
+
+        this.entities.delete(entity.getRuntimeId());
     }
 
     /**
@@ -348,21 +399,7 @@ export default class World {
      * entity.isPlayer() functions.
      */
     public getEntities(): Entity[] {
-        return [...Array.from(this.entities.values()), ...Array.from(this.players.values())];
-    }
-
-    /**
-     * Adds a player into the level.
-     */
-    public addPlayer(player: Player): void {
-        this.players.set(player.runtimeId, player);
-    }
-
-    /**
-     * Removes a player from the level.
-     */
-    public removePlayer(player: Player): void {
-        this.players.delete(player.runtimeId);
+        return Array.from(this.entities.values());
     }
 
     /**
@@ -372,10 +409,14 @@ export default class World {
         const timer = new Timer();
         this.server
             .getLogger()
-            .info(`Saving chunks for level §b'${this.name}'/${this.generator.constructor.name}§r`, 'World/saveChunks');
+            ?.info(`Saving chunks for level §b'${this.name}'/${this.generator.constructor.name}§r`, 'World/saveChunks');
 
-        await Promise.all(Array.from(this.chunks.values()).map(async (chunk) => this.provider.writeChunk(chunk)));
-        this.server.getLogger().debug(`(took ${timer.stop()} ms)!`, 'World/saveChunks');
+        await Promise.all(
+            Array.from(this.chunks.values())
+                .filter((c) => c.getHasChanged())
+                .map(async (chunk) => this.provider.writeChunk(chunk))
+        );
+        this.server.getLogger()?.verbose(`(took ${timer.stop()} ms)!`, 'World/saveChunks');
     }
 
     public async save(): Promise<void> {
@@ -387,10 +428,6 @@ export default class World {
                 await this.savePlayerData(player);
             });
         await this.saveChunks();
-    }
-
-    public async close(): Promise<void> {
-        await this.getProvider().close();
     }
 
     public getGameruleManager(): GameruleManager {
@@ -425,14 +462,14 @@ export default class World {
     public async getPlayerData(player: Player): Promise<WorldPlayerData> {
         try {
             const playerData = fs.readFileSync(
-                path.join(cwd(), 'worlds', this.getName(), 'players', `${player.getXUID()}.json`)
+                path.join(cwd(), 'worlds', this.getName(), 'playerdata', `${player.getXUID()}.json`)
             );
 
             return JSON.parse(minifyJson(playerData.toString('utf-8'))) as WorldPlayerData;
         } catch {
             this.server
                 .getLogger()
-                .debug(`PlayerData is missing for player ${player.getXUID()}`, 'World/getPlayerData');
+                ?.debug(`PlayerData is missing for player ${player.getXUID()}`, 'World/getPlayerData');
 
             return {
                 gamemode: this.server.getConfig().getGamemode(),
@@ -451,7 +488,7 @@ export default class World {
     public async savePlayerData(player: Player): Promise<void> {
         try {
             fs.writeFileSync(
-                path.join(cwd(), 'worlds', this.getName(), 'players', `${player.getXUID()}.json`),
+                path.join(cwd(), 'worlds', this.getName(), 'playerdata', `${player.getXUID()}.json`),
                 JSON.stringify(
                     {
                         uuid: player.getUUID(),
@@ -488,8 +525,8 @@ export default class World {
                 )
             );
         } catch (error) {
-            this.server.getLogger().error(`Failed to save player data: ${error}`, 'World/savePlayerData');
-            this.server.getLogger().silly(error.stack, 'World/savePlayerData');
+            this.server.getLogger()?.error(`Failed to save player data: ${error}`, 'World/savePlayerData');
+            this.server.getLogger()?.debug(error.stack, 'World/savePlayerData');
         }
     }
 }

@@ -6,6 +6,11 @@ import minifyJson from 'strip-json-comments';
 import path from 'path';
 import util from 'util';
 
+/**
+ * Ban manager.
+ *
+ * @public
+ */
 export default class BanManager {
     private readonly server: Server;
     private readonly banned: Map<
@@ -30,7 +35,7 @@ export default class BanManager {
     private async parseBanned() {
         try {
             if (!fs.existsSync(path.join(cwd(), '/banned-players.json'))) {
-                this.server.getLogger().warn(`Failed to load ban list!`, 'BanManager/parseBanned');
+                this.server.getLogger()?.warn(`Failed to load ban list!`, 'BanManager/parseBanned');
                 fs.writeFileSync(path.join(cwd(), '/banned-players.json'), '[]');
             }
 
@@ -41,7 +46,7 @@ export default class BanManager {
 
             for (const player of banned) this.banned.set(player.name, player);
         } catch (error) {
-            this.server.getLogger().error(error, 'BanManager/parseBanned');
+            this.server.getLogger()?.error(error, 'BanManager/parseBanned');
             throw new Error(`Invalid banned-players.json file.`);
         }
     }

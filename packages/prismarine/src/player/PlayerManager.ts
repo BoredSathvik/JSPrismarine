@@ -1,15 +1,9 @@
 import Player from './Player';
 import { PlayerListEntry } from '../network/packet/PlayerListPacket';
-import Server from '../Server';
 
 export default class PlayerManager {
-    private server: Server;
-    private readonly players: Map<string, Player> = new Map();
-    private readonly playerList: Map<string, PlayerListEntry> = new Map();
-
-    public constructor(server: Server) {
-        this.server = server;
-    }
+    private readonly players: Map<string, Player> = new Map() as Map<string, Player>;
+    private readonly playerList: Map<string, PlayerListEntry> = new Map() as Map<string, PlayerListEntry>;
 
     public getPlayer(address: string): Player {
         const player = this.players.get(address);
@@ -43,7 +37,7 @@ export default class PlayerManager {
      * if it is not found, null is returned.
      */
     public getPlayerById(id: bigint): Player {
-        const player = this.getOnlinePlayers().find((player) => player.runtimeId === id);
+        const player = this.getOnlinePlayers().find((player) => player.getRuntimeId() === id);
 
         if (!player) throw new Error(`Can't find player with id ${id}`);
 

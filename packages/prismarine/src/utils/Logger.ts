@@ -13,7 +13,9 @@ export default class LoggerBuilder {
 
     public constructor() {
         const date = new Date();
-        if (!LoggerBuilder.logFile)
+        if (!LoggerBuilder.logFile && process.env.NODE_ENV === 'development')
+            LoggerBuilder.logFile = 'jsprismarine-development.log';
+        else if (!LoggerBuilder.logFile)
             // mmddyyyy-hh-mm-ss. yes American-style, sue me.
             LoggerBuilder.logFile = `jsprismarine.${(date.getMonth() + 1)
                 .toString()
@@ -44,7 +46,9 @@ export default class LoggerBuilder {
                             return `[${timestamp} ${level}${colorParser(
                                 `${
                                     namespace &&
-                                    ((global as any).log_level === 'silly' || (global as any).log_level === 'debug')
+                                    ((global as any).log_level === 'silly' ||
+                                        (global as any).log_level === 'debug' ||
+                                        (global as any).log_level === 'verbose')
                                         ? ` ${namespace}]`
                                         : ']'
                                 }: ${message}`
@@ -53,7 +57,7 @@ export default class LoggerBuilder {
                     )
                 }),
                 new transports.File({
-                    level: 'silly',
+                    level: 'debug',
                     filename: path.join(cwd(), 'logs', `${LoggerBuilder.logFile}`),
                     format: combine(
                         timestamp({ format: 'HH:mm:ss.SS' }),
@@ -106,6 +110,16 @@ export default class LoggerBuilder {
      */
     public error = (message: string, namespace?: string) => {
         this.logger.log('error', message, {
+            namespace
+        });
+    };
+
+    /**
+     * Log verbose messages
+     * @param message
+     */
+    public verbose = (message: string, namespace?: string) => {
+        this.logger.log('verbose', message, {
             namespace
         });
     };

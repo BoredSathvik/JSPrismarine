@@ -44,10 +44,13 @@ export function EventEmitterishMixin<EventTypes extends [string, any], TBase ext
         public constructor(...args: any[]) {
             super(...args);
 
+            // Hack?
+            Evt.setDefaultMaxHandlers(Number.MAX_SAFE_INTEGER);
+
             instanceProperties.set(this, {
                 evt: getEvt({
-                    constructorArgs: args as any,
-                    instance: this as any
+                    constructorArgs: args as ConstructorParameters<TBase>,
+                    instance: this as InstanceType<TBase>
                 }),
                 ctx: Evt.newCtx()
             });
@@ -56,7 +59,7 @@ export function EventEmitterishMixin<EventTypes extends [string, any], TBase ext
         public on<T extends EventTypes, K extends T[0]>(
             id: K,
             callback: (event: T extends readonly [K, infer U] ? U : never) => void
-        ): this {
+        ): any {
             const { evt, ctx } = instanceProperties.get(this)!;
 
             evt.$attach(to(id), ctx, callback);
@@ -67,7 +70,7 @@ export function EventEmitterishMixin<EventTypes extends [string, any], TBase ext
         public once<T extends EventTypes, K extends T[0]>(
             id: K,
             callback: (event: T extends readonly [K, infer U] ? U : never) => void
-        ): this {
+        ): any {
             const { evt, ctx } = instanceProperties.get(this)!;
 
             evt.$attachOnce(to(id), ctx, callback);
@@ -78,7 +81,7 @@ export function EventEmitterishMixin<EventTypes extends [string, any], TBase ext
         public removeListener<T extends EventTypes, K extends T[0]>(
             id: K,
             callback: (event: T extends readonly [K, infer U] ? U : never) => void
-        ): this {
+        ): any {
             const { ctx } = instanceProperties.get(this)!;
 
             ctx.getHandlers()
@@ -88,7 +91,7 @@ export function EventEmitterishMixin<EventTypes extends [string, any], TBase ext
             return this;
         }
 
-        public removeAllListeners(id?: EventTypes[0]): this {
+        public removeAllListeners(id?: EventTypes[0]): any {
             const { ctx } = instanceProperties.get(this)!;
 
             if (id === undefined) {

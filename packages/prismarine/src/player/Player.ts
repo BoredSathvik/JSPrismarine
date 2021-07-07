@@ -1,27 +1,34 @@
+import { ChangeDimensionPacket, LevelChunkPacket } from '../network/Packets';
 import { Connection, InetAddress } from '@jsprismarine/raknet';
+
 import ChatEvent from '../events/chat/ChatEvent';
 import Chunk from '../world/chunk/Chunk';
-import CommandExecuter from '../command/CommandExecuter';
 import ContainerEntry from '../inventory/ContainerEntry';
 import Device from '../utils/Device';
 import FormManager from '../form/FormManager';
 import Gamemode from '../world/Gamemode';
 import Human from '../entity/Human';
 import MovementType from '../network/type/MovementType';
+import PlayStatusType from '../network/type/PlayStatusType';
 import PlayerConnection from './PlayerConnection';
 import PlayerSetGamemodeEvent from '../events/player/PlayerSetGamemodeEvent';
 import PlayerToggleFlightEvent from '../events/player/PlayerToggleFlightEvent';
 import PlayerToggleSprintEvent from '../events/player/PlayerToggleSprintEvent';
 import Server from '../Server';
 import Skin from '../utils/skin/Skin';
+import TextType from '../network/type/TextType';
+import Timer from '../utils/Timer';
 import Vector3 from '../math/Vector3';
 import WindowManager from '../inventory/WindowManager';
 import World from '../world/World';
 
-export default class Player extends Human implements CommandExecuter {
+export default class Player extends Human {
     private readonly address: InetAddress;
     private readonly playerConnection: PlayerConnection;
     private permissions: string[];
+
+    // Only used for metrics
+    private joinTimer = new Timer();
 
     // TODO: finish implementation
     private readonly windows: WindowManager;
@@ -73,6 +80,7 @@ export default class Player extends Human implements CommandExecuter {
         this.windows = new WindowManager();
         this.forms = new FormManager();
         this.permissions = [];
+        this.joinTimer.reset();
 
         // Handle chat messages
         server.getEventManager().on('chat', async (evt: ChatEvent) => {
@@ -84,7 +92,7 @@ export default class Player extends Human implements CommandExecuter {
                 (evt.getChat().getChannel() === '*.ops' && this.isOp()) ||
                 evt.getChat().getChannel() === `*.player.${this.getName()}`
             )
-                await this.sendMessage(evt.getChat().getMessage());
+                await this.sendMessage(evt.getChat().getMessage(), (evt.getChat().getType() as number) as TextType);
         });
     }
 
@@ -94,9 +102,9 @@ export default class Player extends Human implements CommandExecuter {
         const playerData = await this.getWorld().getPlayerData(this);
 
         void this.setGamemode(Gamemode.getGamemodeId(playerData.gamemode));
-        this.setX(playerData.position.x);
-        this.setY(playerData.position.y);
-        this.setZ(playerData.position.z);
+        await this.setX(playerData.position.x);
+        await this.setY(playerData.position.y);
+        await this.setZ(playerData.position.z);
         this.pitch = playerData.position.pitch;
         this.yaw = playerData.position.yaw;
 
@@ -106,7 +114,7 @@ export default class Player extends Human implements CommandExecuter {
                 this.getServer().getBlockManager().getBlock(item.id);
 
             if (!entry) {
-                this.getServer().getLogger().debug(`Item/block with id ${item.id} is invalid`, 'Player/onEnable');
+                this.getServer().getLogger()?.warn(`Item/block with id ${item.id} is invalid`, 'Player/onEnable');
                 return;
             }
 
@@ -119,6 +127,10 @@ export default class Player extends Human implements CommandExecuter {
             );
         });
 
+        if (!this.connected)
+            this.getServer()
+                .getLogger()
+                ?.debug(`(Complete player creation took ${this.joinTimer.stop()} ms)`, 'Player/onEnable');
         this.connected = true;
     }
 
@@ -128,16 +140,76 @@ export default class Player extends Human implements CommandExecuter {
         this.connected = false;
     }
 
+    /**
+     * Change the player's current world.
+     *
+     * @param world the new world
+     */
+    public async setWorld(world: World) {
+        const dim0 = new ChangeDimensionPacket();
+        dim0.dimension = 0;
+        dim0.position = this;
+        dim0.respawn = false;
+
+        const dim1 = new ChangeDimensionPacket();
+        dim1.dimension = 1;
+        dim1.position = new Vector3(0, 0, 0); // TODO: load this properly
+        dim1.respawn = false;
+
+        await this.getConnection().sendDataPacket(dim0);
+        await this.getConnection().sendPlayStatus(PlayStatusType.PlayerSpawn);
+        await this.getConnection().sendDataPacket(dim1);
+        await this.getConnection().sendPlayStatus(PlayStatusType.PlayerSpawn);
+
+        await this.getWorld().removeEntity(this);
+        await world.addEntity(this);
+        await super.setWorld.bind(this)(world);
+
+        await this.setPosition(new Vector3(0, 0, 0));
+        for (let x = -3; x < 3; x++) {
+            for (let z = -3; z < 3; z++) {
+                const pk = new LevelChunkPacket();
+                pk.chunkX = x; // TODO
+                pk.chunkZ = z; // TODO
+                pk.data = Buffer.from('');
+                pk.subChunkCount = 0;
+                await this.getConnection().sendDataPacket(pk);
+            }
+        }
+
+        await this.getConnection().sendDataPacket(dim1);
+        await this.getConnection().sendPlayStatus(PlayStatusType.PlayerSpawn);
+        await this.getConnection().sendDataPacket(dim0);
+        await this.getConnection().sendPlayStatus(PlayStatusType.PlayerSpawn);
+
+        this.currentChunk = null;
+        await this.getConnection().clearChunks();
+        await this.getConnection().needNewChunks();
+        await this.onEnable();
+        await this.getConnection().sendPlayStatus(PlayStatusType.PlayerSpawn);
+    }
+
     public isOnline() {
         return this.connected;
     }
 
     public async update(tick: number): Promise<void> {
+        // Call super method
+        await super.update.bind(this)(tick);
         await this.playerConnection.update(tick);
+
+        // TODO: get documentation about timings from vanilla
+        // 1 second / 20 = 1 tick, 20 * 5 = 1 second
+        // 1 second * 60 = 1 minute
+        if (tick % (20 * 5 * 60 * 1) === 0) {
+            await this.playerConnection.sendTime(tick);
+        }
     }
 
     public async kick(reason = 'unknown reason'): Promise<void> {
-        this.getServer().getLogger().debug(`Player with id §b${this.runtimeId}§r was kicked: ${reason}`, 'Player/kick');
+        this.getServer()
+            .getLogger()
+            ?.verbose(`Player with id §b${this.getRuntimeId()}§r was kicked: ${reason}`, 'Player/kick');
         await this.playerConnection.kick(reason);
     }
 
@@ -152,19 +224,27 @@ export default class Player extends Human implements CommandExecuter {
         );
     }
 
-    // Return all the players in the same chunk
+    // Return all the players in the same chunk,.
     // TODO: move to world
     public getPlayersInChunk(): Player[] {
         return this.getServer()
             .getPlayerManager()
             .getOnlinePlayers()
-            .filter((player) => player.currentChunk === this.currentChunk);
+            .filter((player) => player.getCurrentChunk() === this.getCurrentChunk());
     }
 
-    public async sendMessage(message: string): Promise<void> {
+    // TODO: these
+    public async sendSpawn() {}
+    public async sendDespawn() {}
+
+    /**
+     * Send a chat message to the client.
+     * @param message the message
+     */
+    public async sendMessage(message: string, type: TextType = TextType.Raw): Promise<void> {
         // TODO: Do this properly like java edition,
         // in other words, the message should be JSON formatted.
-        await this.playerConnection.sendMessage(message);
+        await this.playerConnection.sendMessage(message, '', false, type);
     }
 
     public async setGamemode(mode: number): Promise<void> {
@@ -235,10 +315,21 @@ export default class Player extends Human implements CommandExecuter {
     public isPlayer(): boolean {
         return true;
     }
+
+    /**
+     * Check if the `Player` is an operator.
+     *
+     * @returns `true` if this player is an operator otherwise `false`.
+     */
     public isOp(): boolean {
         return this.getServer().getPermissionManager().isOp(this.getName());
     }
 
+    /**
+     * Check if the `Player` is sprinting.
+     *
+     * @returns `true` if this player is sprinting otherwise `false`.
+     */
     public isSprinting() {
         return this.sprinting;
     }
@@ -287,18 +378,33 @@ export default class Player extends Human implements CommandExecuter {
     }
 
     public async setOnGround(val: boolean) {
+        if (val === this.onGround) return;
+
         this.onGround = val;
-        await this.sendSettings();
     }
 
+    /**
+     * Set the position.
+     *
+     * @remarks
+     * This will notify the player's client about the position change.
+     *
+     * @param position The position
+     * @param type The movement type
+     */
     public async setPosition(position: Vector3, type: MovementType = MovementType.Normal) {
-        this.setX(position.getX());
-        this.setY(position.getY());
-        this.setZ(position.getZ());
+        await this.setX(position.getX());
+        await this.setY(position.getY());
+        await this.setZ(position.getZ());
         await this.getConnection().broadcastMove(this, type);
     }
 
-    public getType(): string {
-        return 'minecraft:player';
+    public setCurrentChunk(chunk: Chunk) {
+        if (this.currentChunk === chunk) return;
+        this.currentChunk = chunk;
+    }
+
+    public getCurrentChunk() {
+        return this.currentChunk!;
     }
 }

@@ -1,12 +1,11 @@
 import Chat from './chat/Chat';
 import ChatEvent from './events/chat/ChatEvent';
-import CommandExecuter from './command/CommandExecuter';
-import type Entity from './entity/entity';
+import type Entity from './entity/Entity';
 import type Server from './Server';
 import Vector3 from './math/Vector3';
 import readline from 'readline';
 
-export default class Console implements CommandExecuter {
+export default class Console {
     private readonly server: Server;
     private cli: readline.Interface;
     public runtimeId = BigInt(-1);
@@ -21,8 +20,8 @@ export default class Console implements CommandExecuter {
         try {
             if (process.stdin.isTTY) process.stdin.setRawMode(true);
         } catch (error) {
-            this.server.getLogger().warn(`Failed to enable stdin rawMode: ${error}!`);
-            this.server.getLogger().silly(error.stack);
+            this.server.getLogger()?.warn(`Failed to enable stdin rawMode: ${error}!`);
+            this.server.getLogger()?.debug(error.stack);
         }
 
         const completer = (line: string) => {
@@ -51,7 +50,9 @@ export default class Console implements CommandExecuter {
 
         this.cli.on('line', (input: string) => {
             if (input.startsWith('/')) {
-                void this.getServer().getCommandManager().dispatchCommand(this, input.slice(1));
+                void this.getServer()
+                    .getCommandManager()
+                    .dispatchCommand(this as any, this as any, input.slice(1));
                 return;
             }
 
@@ -61,14 +62,12 @@ export default class Console implements CommandExecuter {
 
         server.getEventManager().on('chat', async (evt: ChatEvent) => {
             if (evt.cancelled) return;
-
-            if (
-                evt.getChat().getChannel() === '*.everyone' ||
-                evt.getChat().getChannel() === '*.ops' ||
-                evt.getChat().getChannel() === `*.console`
-            )
-                await this.sendMessage(evt.getChat().getMessage());
+            await this.sendMessage(evt.getChat().getMessage());
         });
+    }
+
+    public getRuntimeId(): bigint {
+        return this.runtimeId;
     }
 
     public async onDisable(): Promise<void> {
@@ -84,7 +83,7 @@ export default class Console implements CommandExecuter {
     }
 
     public async sendMessage(message: string): Promise<void> {
-        this.getServer().getLogger().info(message, 'Console');
+        this.getServer().getLogger()?.info(message, 'Console');
     }
 
     public getWorld() {
@@ -113,6 +112,18 @@ export default class Console implements CommandExecuter {
         return 0;
     }
 
+    public getPosition(): Vector3 {
+        return new Vector3();
+    }
+
+    public getType() {
+        return 'jsprismarine:console';
+    }
+
+    public isConsole(): boolean {
+        return true;
+    }
+
     /**
      * Returns the nearest entity from the current entity
      *
@@ -133,7 +144,7 @@ export default class Console implements CommandExecuter {
         return [
             closest(
                 pos,
-                entities.filter((a) => a.runtimeId !== this.runtimeId)
+                entities.filter((a) => a.getRuntimeId() !== this.getRuntimeId())
             )
         ].filter((a) => a);
     }
